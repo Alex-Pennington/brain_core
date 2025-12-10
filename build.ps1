@@ -9,6 +9,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 
 $CXX = "g++"
 $CXXFLAGS = "-std=c++17 -O2 -I. -Im188110a -D_USE_MATH_DEFINES -DWIN32"
+# Static link libgcc and libstdc++ - KERNEL32/WS2_32/UCRT are Windows system DLLs
 $LDFLAGS = "-lws2_32 -static -static-libgcc -static-libstdc++"
 
 $Sources = @(
