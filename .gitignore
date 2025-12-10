@@ -4,6 +4,7 @@
 *.obj
 build/
 build_err.txt
+brain_modem_server
 
 # PCM output files
 tx_pcm_out/*.pcm

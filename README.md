@@ -20,6 +20,28 @@ Stripped of Qt/GUI dependencies for headless testing via TCP/IP and PCM files.
 
 Requires: MinGW g++ with C++17 support
 
+## Building (Linux/macOS)
+
+```bash
+./build.sh
+```
+
+Requires: g++ with C++17 support
+
+## License Setup
+
+The modem requires a hardware-specific license key. If you get a "License not valid for this hardware" error:
+
+```bash
+# Generate a license key for your hardware
+python3 generate_license.py [CUSTOMER_ID] [EXPIRY_DATE]
+
+# Example:
+python3 generate_license.py TEST01 20261209
+```
+
+This will create a valid `license.key` file for your CPU.
+
 ## Usage
 
 ```powershell
