@@ -37,8 +37,7 @@ enum class LicenseStatus {
     HARDWARE_MISMATCH,  // Hardware doesn't match license
     EXPIRED,            // License has expired
     NOT_FOUND,          // No license file found
-    TAMPERED,           // License file has been modified
-    TRIAL_EXPIRED       // Trial period expired
+    TAMPERED            // License file has been modified
 };
 
 /**
@@ -48,13 +47,11 @@ struct LicenseInfo {
     std::string customer_id;
     std::string hardware_id;
     std::time_t expiration_date;
-    bool is_trial;
     int max_channels;  // 0 = unlimited
     
     LicenseInfo() 
         : expiration_date(0)
-        , is_trial(true)
-        , max_channels(1)
+        , max_channels(0)
     {}
 };
 
@@ -130,55 +127,9 @@ public:
         info.customer_id = customer;
         info.hardware_id = hw_id;
         info.expiration_date = expiry;
-        info.is_trial = false;
         info.max_channels = 0;  // Unlimited
         
         return LicenseStatus::VALID;
-    }
-    
-    /**
-     * Generate license key (for admin tool)
-     * 
-     * @param customer_id Customer identifier (e.g., "ACME01")
-     * @param hardware_id Hardware fingerprint
-     * @param days_valid Days until expiration (0 = 1 year)
-     */
-    static std::string generate_license_key(
-        const std::string& customer_id,
-        const std::string& hardware_id,
-        int days_valid = 365)
-    {
-        // Calculate expiration date
-        std::time_t now = std::time(nullptr);
-        std::time_t expiry = now + (days_valid * 24 * 60 * 60);
-        
-        std::tm* expiry_tm = std::gmtime(&expiry);
-        char date_str[16];
-        std::strftime(date_str, sizeof(date_str), "%Y%m%d", expiry_tm);
-        
-        // Compute checksum
-        std::string data = customer_id + hardware_id + std::string(date_str);
-        std::string checksum = compute_checksum(data);
-        
-        // Format license key
-        return customer_id + "-" + hardware_id + "-" + std::string(date_str) + "-" + checksum;
-    }
-    
-    /**
-     * Create trial license (30 days, single channel)
-     */
-    static LicenseInfo create_trial_license() {
-        LicenseInfo info;
-        info.customer_id = "TRIAL";
-        info.hardware_id = get_hardware_id();
-        info.is_trial = true;
-        info.max_channels = 1;
-        
-        // 30 days from now
-        std::time_t now = std::time(nullptr);
-        info.expiration_date = now + (30 * 24 * 60 * 60);
-        
-        return info;
     }
     
     /**
@@ -223,8 +174,6 @@ public:
                 return "License file not found";
             case LicenseStatus::TAMPERED:
                 return "License file has been tampered with";
-            case LicenseStatus::TRIAL_EXPIRED:
-                return "Trial period has expired";
             default:
                 return "Unknown license status";
         }

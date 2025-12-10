@@ -41,6 +41,7 @@
 #include <ctime>
 
 #include "m188110a/Cm110s.h"
+#include "m188110a/license.h"
 
 // ============================================================
 // Configuration
@@ -496,6 +497,25 @@ int main(int argc, char* argv[]) {
     std::cout << "Paul Brain Modem Core - Headless TCP Server\n";
     std::cout << "Phoenix Nest LLC Wrapper for Testing\n";
     std::cout << "=================================================\n";
+    
+    // License check - required for operation
+    m110a::LicenseInfo license_info;
+    m110a::LicenseStatus license_status = m110a::LicenseManager::load_license_file("license.key", license_info);
+    
+    if (license_status != m110a::LicenseStatus::VALID) {
+        std::cerr << "\n[LICENSE] " << m110a::LicenseManager::get_status_message(license_status) << std::endl;
+        std::cerr << "[LICENSE] Valid license.key file required to run.\n" << std::endl;
+        return 1;
+    }
+    
+    std::time_t exp = license_info.expiration_date;
+    std::tm* exp_tm = std::localtime(&exp);
+    char date_buf[32];
+    std::strftime(date_buf, sizeof(date_buf), "%Y-%m-%d", exp_tm);
+    
+    std::cout << "\n[LICENSE] Valid license for: " << license_info.customer_id << std::endl;
+    std::cout << "[LICENSE] Expires: " << date_buf << std::endl;
+    std::cout << "[LICENSE] Channels: " << (license_info.max_channels == 0 ? "Unlimited" : std::to_string(license_info.max_channels)) << "\n" << std::endl;
     
 #ifdef _WIN32
     WSADATA wsaData;
