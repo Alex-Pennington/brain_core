@@ -1,0 +1,554 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2025 Phoenix Nest LLC
+// Paul Brain Modem Core - Headless TCP Server Wrapper
+//
+// Wraps the original m188110a modem core with:
+// - TCP control port (3999) for commands
+// - TCP data port (3998) for TX/RX data
+// - PCM file I/O for testing (no audio devices)
+
+#ifdef _WIN32
+#define _WIN32_WINNT 0x0601
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <errno.h>
+#define SOCKET int
+#define INVALID_SOCKET -1
+#define closesocket close
+#endif
+
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <chrono>
+#include <cstring>
+#include <algorithm>
+#include <csignal>
+#include <iomanip>
+#include <ctime>
+
+#include "m188110a/Cm110s.h"
+
+// ============================================================
+// Configuration
+// ============================================================
+
+constexpr uint16_t DEFAULT_DATA_PORT = 3998;
+constexpr uint16_t DEFAULT_CONTROL_PORT = 3999;
+constexpr int SAMPLE_RATE = 48000;
+constexpr int SOUNDBLOCK_SIZE = 1024;
+
+// ============================================================
+// Global State
+// ============================================================
+
+static Cm110s g_modem;
+static std::atomic<bool> g_running{true};
+static std::mutex g_modem_mutex;
+
+// TX state
+static std::vector<uint8_t> g_tx_buffer;
+static std::string g_pcm_output_dir = "./tx_pcm_out/";
+static std::string g_pcm_prefix = "";
+static bool g_record_tx = true;
+static std::vector<float> g_tx_pcm_buffer;
+
+// RX state  
+static std::vector<uint8_t> g_rx_buffer;
+static std::mutex g_rx_mutex;
+
+// Sockets
+static SOCKET g_control_listen = INVALID_SOCKET;
+static SOCKET g_data_listen = INVALID_SOCKET;
+static SOCKET g_control_client = INVALID_SOCKET;
+static SOCKET g_data_client = INVALID_SOCKET;
+
+// Mode mapping
+static const char* MODE_NAMES[] = {
+    "75S", "75L", "150S", "150L", "300S", "300L",
+    "600S", "600L", "1200S", "1200L", "2400S", "2400L",
+    "QUERY_S", "QUERY_L", nullptr
+};
+
+static Mode string_to_mode(const std::string& s) {
+    if (s == "75S" || s == "75 BPS SHORT") return M75NS;
+    if (s == "75L" || s == "75 BPS LONG") return M75NL;
+    if (s == "150S" || s == "150 BPS SHORT") return M150S;
+    if (s == "150L" || s == "150 BPS LONG") return M150L;
+    if (s == "300S" || s == "300 BPS SHORT") return M300S;
+    if (s == "300L" || s == "300 BPS LONG") return M300L;
+    if (s == "600S" || s == "600 BPS SHORT") return M600S;
+    if (s == "600L" || s == "600 BPS LONG") return M600L;
+    if (s == "1200S" || s == "1200 BPS SHORT") return M1200S;
+    if (s == "1200L" || s == "1200 BPS LONG") return M1200L;
+    if (s == "2400S" || s == "2400 BPS SHORT") return M2400S;
+    if (s == "2400L" || s == "2400 BPS LONG") return M2400L;
+    return M600S; // Default
+}
+
+static const char* mode_to_status_string(Mode m) {
+    switch (m) {
+        case M75NS: return "75 BPS SHORT";
+        case M75NL: return "75 BPS LONG";
+        case M150S: return "150 BPS SHORT";
+        case M150L: return "150 BPS LONG";
+        case M300S: return "300 BPS SHORT";
+        case M300L: return "300 BPS LONG";
+        case M600S: return "600 BPS SHORT";
+        case M600L: return "600 BPS LONG";
+        case M1200S: return "1200 BPS SHORT";
+        case M1200L: return "1200 BPS LONG";
+        case M2400S: return "2400 BPS SHORT";
+        case M2400L: return "2400 BPS LONG";
+        default: return "UNKNOWN";
+    }
+}
+
+// ============================================================
+// Callbacks
+// ============================================================
+
+static void rx_byte_callback(U8 byte) {
+    std::lock_guard<std::mutex> lock(g_rx_mutex);
+    g_rx_buffer.push_back(byte);
+}
+
+static void status_callback(ModemStatus status, void* param) {
+    // Only print meaningful status changes, ignore noise
+    switch (status) {
+        case DCD_TRUE_STATUS:  std::cout << "[STATUS] DCD:TRUE" << std::endl; break;
+        case DCD_FALSE_STATUS: std::cout << "[STATUS] DCD:FALSE" << std::endl; break;
+        case TX_TRUE_STATUS:   std::cout << "[STATUS] TX:TRUE" << std::endl; break;
+        case TX_FALSE_STATUS:  std::cout << "[STATUS] TX:FALSE" << std::endl; break;
+        default: break;  // Ignore other status codes to reduce spam
+    }
+}
+
+// ============================================================
+// PCM File I/O
+// ============================================================
+
+static std::string generate_pcm_filename(const std::string& prefix) {
+    auto now = std::chrono::system_clock::now();
+    auto time = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()) % 1000;
+    
+    std::tm tm = *std::localtime(&time);
+    std::ostringstream oss;
+    oss << g_pcm_output_dir << prefix;
+    if (!prefix.empty()) oss << "_";
+    oss << std::put_time(&tm, "%Y%m%d_%H%M%S") << "_" 
+        << std::setfill('0') << std::setw(3) << ms.count() << ".pcm";
+    return oss.str();
+}
+
+static bool write_pcm_file(const std::string& filename, const std::vector<float>& samples) {
+    std::vector<int16_t> pcm16(samples.size());
+    for (size_t i = 0; i < samples.size(); i++) {
+        float s = samples[i] * 32767.0f;
+        if (s > 32767.0f) s = 32767.0f;
+        if (s < -32768.0f) s = -32768.0f;
+        pcm16[i] = static_cast<int16_t>(s);
+    }
+    
+    std::ofstream f(filename, std::ios::binary);
+    if (!f) return false;
+    f.write(reinterpret_cast<const char*>(pcm16.data()), pcm16.size() * 2);
+    return f.good();
+}
+
+static bool read_pcm_file(const std::string& filename, std::vector<int16_t>& samples) {
+    std::ifstream f(filename, std::ios::binary | std::ios::ate);
+    if (!f) return false;
+    
+    size_t size = f.tellg();
+    f.seekg(0, std::ios::beg);
+    
+    samples.resize(size / 2);
+    f.read(reinterpret_cast<char*>(samples.data()), size);
+    return f.good();
+}
+
+// ============================================================
+// Socket Helpers
+// ============================================================
+
+static bool setup_listener(SOCKET& sock, uint16_t port) {
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET) return false;
+    
+    int opt = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt));
+    
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(port);
+    
+    if (bind(sock, (sockaddr*)&addr, sizeof(addr)) < 0) {
+        closesocket(sock);
+        sock = INVALID_SOCKET;
+        return false;
+    }
+    
+    if (listen(sock, 1) < 0) {
+        closesocket(sock);
+        sock = INVALID_SOCKET;
+        return false;
+    }
+    
+    // Set non-blocking
+#ifdef _WIN32
+    u_long mode = 1;
+    ioctlsocket(sock, FIONBIO, &mode);
+#else
+    int flags = fcntl(sock, F_GETFL, 0);
+    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+#endif
+    
+    return true;
+}
+
+static void send_response(SOCKET sock, const std::string& msg) {
+    if (sock == INVALID_SOCKET) return;
+    std::string response = msg + "\n";
+    send(sock, response.c_str(), response.size(), 0);
+}
+
+// ============================================================
+// TX Processing
+// ============================================================
+
+static void do_transmit() {
+    if (g_tx_buffer.empty()) {
+        send_response(g_control_client, "ERROR:NO DATA");
+        return;
+    }
+    
+    std::cout << "[TX] Starting transmit of " << g_tx_buffer.size() << " bytes" << std::endl;
+    
+    g_tx_pcm_buffer.clear();
+    
+    // The modem was designed for Qt where:
+    // - Main thread calls tx_sync_frame_eom (generates audio, blocks until TX_IDLE_STATE)
+    // - Audio callback thread calls tx_get_soundblock (drains queue)
+    // TX_IDLE_STATE only triggers when queue is empty. Without draining = infinite loop.
+    // Fix: Spawn thread to drain queue while tx_sync_frame_eom runs.
+    
+    std::atomic<bool> tx_done{false};
+    
+    // Drain thread - pulls audio blocks from queue while TX runs
+    std::thread drain_thread([&]() {
+        while (!tx_done) {
+            float* block = g_modem.tx_get_soundblock();
+            if (block != nullptr) {
+                g_tx_pcm_buffer.insert(g_tx_pcm_buffer.end(), block, block + SOUNDBLOCK_SIZE);
+                g_modem.tx_release_soundblock(block);
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        }
+        // Drain any remaining blocks after TX completes
+        float* block;
+        while ((block = g_modem.tx_get_soundblock()) != nullptr) {
+            g_tx_pcm_buffer.insert(g_tx_pcm_buffer.end(), block, block + SOUNDBLOCK_SIZE);
+            g_modem.tx_release_soundblock(block);
+        }
+    });
+    
+    // This now completes because drain_thread empties the queue
+    std::cout << "[TX] Calling tx_sync_frame_eom..." << std::endl;
+    g_modem.tx_sync_frame_eom(g_tx_buffer.data(), g_tx_buffer.size());
+    std::cout << "[TX] tx_sync_frame_eom complete" << std::endl;
+    
+    tx_done = true;
+    drain_thread.join();
+    
+    std::cout << "[TX] Collected " << g_tx_pcm_buffer.size() << " samples" << std::endl;
+    
+    // Write PCM file if recording
+    if (g_record_tx && !g_tx_pcm_buffer.empty()) {
+        std::string filename = generate_pcm_filename(g_pcm_prefix);
+        if (write_pcm_file(filename, g_tx_pcm_buffer)) {
+            send_response(g_control_client, "TX:PCM:" + filename);
+        }
+    }
+    
+    send_response(g_control_client, "TX:COMPLETE:" + std::to_string(g_tx_buffer.size()));
+    g_tx_buffer.clear();
+}
+
+// ============================================================
+// RX Processing (PCM File Inject)
+// ============================================================
+
+static void do_rx_inject(const std::string& filename) {
+    std::vector<int16_t> samples;
+    if (!read_pcm_file(filename, samples)) {
+        send_response(g_control_client, "ERROR:CANNOT READ:" + filename);
+        return;
+    }
+    
+    send_response(g_control_client, "RX:INJECTING:" + filename);
+    
+    // Clear RX buffer
+    {
+        std::lock_guard<std::mutex> lock(g_rx_mutex);
+        g_rx_buffer.clear();
+    }
+    
+    // Feed samples to modem in blocks
+    std::lock_guard<std::mutex> lock(g_modem_mutex);
+    g_modem.rx_reset();
+    
+    std::cout << "[RX] Processing " << samples.size() << " samples (" 
+              << (samples.size() / 9600.0) << " seconds at 9600 Hz)" << std::endl;
+    
+    const int BLOCK_SIZE = 512;
+    for (size_t i = 0; i < samples.size(); i += BLOCK_SIZE) {
+        int len = std::min(BLOCK_SIZE, static_cast<int>(samples.size() - i));
+        g_modem.rx_process_block(&samples[i], len);
+    }
+    
+    // Flush with silence to push last data through decoder pipeline
+    std::cout << "[RX] Flushing with silence..." << std::endl;
+    std::vector<int16_t> flush(1920 * 3, 0);  // 3 blocks of silence
+    for (size_t i = 0; i < flush.size(); i += BLOCK_SIZE) {
+        int len = std::min(BLOCK_SIZE, static_cast<int>(flush.size() - i));
+        g_modem.rx_process_block(&flush[i], len);
+    }
+    
+    // Report received data
+    std::lock_guard<std::mutex> rx_lock(g_rx_mutex);
+    if (!g_rx_buffer.empty()) {
+        // Send to data port if connected
+        if (g_data_client != INVALID_SOCKET) {
+            send(g_data_client, reinterpret_cast<char*>(g_rx_buffer.data()), 
+                 g_rx_buffer.size(), 0);
+        }
+        send_response(g_control_client, "RX:COMPLETE:" + std::to_string(g_rx_buffer.size()));
+        
+        // Also report detected mode
+        const char* mode = g_modem.rx_get_mode_string();
+        send_response(g_control_client, std::string("RX:MODE:") + (mode ? mode : "UNKNOWN"));
+    } else {
+        send_response(g_control_client, "RX:COMPLETE:0");
+    }
+}
+
+// ============================================================
+// Command Handler
+// ============================================================
+
+static void handle_command(const std::string& cmd) {
+    std::cout << "[CMD] " << cmd << std::endl;
+    
+    // Trim whitespace
+    std::string c = cmd;
+    while (!c.empty() && (c.back() == '\r' || c.back() == '\n' || c.back() == ' '))
+        c.pop_back();
+    
+    if (c.rfind("CMD:DATA RATE:", 0) == 0) {
+        std::string rate = c.substr(14);
+        Mode mode = string_to_mode(rate);
+        std::lock_guard<std::mutex> lock(g_modem_mutex);
+        g_modem.tx_set_mode(mode);
+        send_response(g_control_client, std::string("OK:DATA RATE:") + mode_to_status_string(mode));
+    }
+    else if (c == "CMD:SENDBUFFER") {
+        do_transmit();
+    }
+    else if (c == "CMD:RESET MDM") {
+        std::lock_guard<std::mutex> lock(g_modem_mutex);
+        g_modem.rx_reset();
+        g_tx_buffer.clear();
+        send_response(g_control_client, "OK:RESET");
+    }
+    else if (c == "CMD:KILL TX") {
+        g_tx_buffer.clear();
+        send_response(g_control_client, "OK:TX KILLED");
+    }
+    else if (c == "CMD:RECORD TX:ON") {
+        g_record_tx = true;
+        send_response(g_control_client, "OK:RECORD TX:ON");
+    }
+    else if (c == "CMD:RECORD TX:OFF") {
+        g_record_tx = false;
+        send_response(g_control_client, "OK:RECORD TX:OFF");
+    }
+    else if (c.rfind("CMD:RECORD PREFIX:", 0) == 0) {
+        g_pcm_prefix = c.substr(18);
+        send_response(g_control_client, "OK:PREFIX:" + g_pcm_prefix);
+    }
+    else if (c.rfind("CMD:RXAUDIOINJECT:", 0) == 0) {
+        std::string path = c.substr(18);
+        do_rx_inject(path);
+    }
+    else if (c == "CMD:QUERY:PCM OUTPUT") {
+        send_response(g_control_client, "PCM OUTPUT:" + g_pcm_output_dir);
+    }
+    else if (c == "CMD:QUERY:STATUS") {
+        std::lock_guard<std::mutex> lock(g_modem_mutex);
+        std::string status = "STATUS:IDLE";
+        status += " TX_MODE:" + std::string(g_modem.tx_get_mode_string());
+        status += " TX_BUF:" + std::to_string(g_tx_buffer.size());
+        send_response(g_control_client, status);
+    }
+    else if (c == "CMD:QUERY:MODES") {
+        send_response(g_control_client, 
+            "MODES:75S,75L,150S,150L,300S,300L,600S,600L,1200S,1200L,2400S,2400L");
+    }
+    else if (c == "CMD:QUERY:HELP") {
+        send_response(g_control_client, 
+            "COMMANDS:DATA RATE,SENDBUFFER,RESET MDM,KILL TX,"
+            "RECORD TX:ON/OFF,RECORD PREFIX,RXAUDIOINJECT,QUERY:*");
+    }
+    else if (c == "CMD:QUERY:VERSION") {
+        send_response(g_control_client, "VERSION:Paul Brain Core 1.0 (Phoenix Nest Wrapper)");
+    }
+    else {
+        send_response(g_control_client, "ERROR:UNKNOWN COMMAND");
+    }
+}
+
+// ============================================================
+// Main Loop
+// ============================================================
+
+static void poll_sockets() {
+    // Accept control connection
+    if (g_control_client == INVALID_SOCKET) {
+        sockaddr_in addr{};
+        socklen_t len = sizeof(addr);
+        SOCKET client = accept(g_control_listen, (sockaddr*)&addr, &len);
+        if (client != INVALID_SOCKET) {
+            g_control_client = client;
+            std::cout << "[CONTROL] Client connected" << std::endl;
+            send_response(g_control_client, "READY:Paul Brain Core");
+        }
+    }
+    
+    // Accept data connection
+    if (g_data_client == INVALID_SOCKET) {
+        sockaddr_in addr{};
+        socklen_t len = sizeof(addr);
+        SOCKET client = accept(g_data_listen, (sockaddr*)&addr, &len);
+        if (client != INVALID_SOCKET) {
+            g_data_client = client;
+            std::cout << "[DATA] Client connected" << std::endl;
+        }
+    }
+    
+    // Read control commands
+    if (g_control_client != INVALID_SOCKET) {
+        char buf[4096];
+        int n = recv(g_control_client, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+            buf[n] = '\0';
+            std::string data(buf);
+            size_t pos;
+            while ((pos = data.find('\n')) != std::string::npos) {
+                std::string cmd = data.substr(0, pos);
+                handle_command(cmd);
+                data = data.substr(pos + 1);
+            }
+        } else if (n == 0) {
+            std::cout << "[CONTROL] Client disconnected" << std::endl;
+            closesocket(g_control_client);
+            g_control_client = INVALID_SOCKET;
+        }
+    }
+    
+    // Read data port (TX data buffer)
+    if (g_data_client != INVALID_SOCKET) {
+        char buf[4096];
+        int n = recv(g_data_client, buf, sizeof(buf), 0);
+        if (n > 0) {
+            g_tx_buffer.insert(g_tx_buffer.end(), buf, buf + n);
+        } else if (n == 0) {
+            std::cout << "[DATA] Client disconnected" << std::endl;
+            closesocket(g_data_client);
+            g_data_client = INVALID_SOCKET;
+        }
+    }
+}
+
+static void signal_handler(int sig) {
+    g_running = false;
+}
+
+int main(int argc, char* argv[]) {
+    std::cout << "=================================================\n";
+    std::cout << "Paul Brain Modem Core - Headless TCP Server\n";
+    std::cout << "Phoenix Nest LLC Wrapper for Testing\n";
+    std::cout << "=================================================\n";
+    
+#ifdef _WIN32
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+#endif
+    
+    // Initialize modem
+    g_modem.register_receive_octet_callback_function(rx_byte_callback);
+    g_modem.register_status(status_callback);
+    g_modem.tx_set_soundblock_size(SOUNDBLOCK_SIZE);
+    g_modem.tx_set_mode(M600S);  // Default mode
+    g_modem.rx_enable();
+    g_modem.tx_enable();
+    
+    // Create output directory
+#ifdef _WIN32
+    CreateDirectoryA(g_pcm_output_dir.c_str(), nullptr);
+#else
+    mkdir(g_pcm_output_dir.c_str(), 0755);
+#endif
+    
+    // Setup listeners
+    if (!setup_listener(g_control_listen, DEFAULT_CONTROL_PORT)) {
+        std::cerr << "Failed to bind control port " << DEFAULT_CONTROL_PORT << std::endl;
+        return 1;
+    }
+    if (!setup_listener(g_data_listen, DEFAULT_DATA_PORT)) {
+        std::cerr << "Failed to bind data port " << DEFAULT_DATA_PORT << std::endl;
+        return 1;
+    }
+    
+    std::cout << "Listening on control:" << DEFAULT_CONTROL_PORT 
+              << " data:" << DEFAULT_DATA_PORT << std::endl;
+    std::cout << "PCM output directory: " << g_pcm_output_dir << std::endl;
+    std::cout << "Press Ctrl+C to exit.\n" << std::endl;
+    
+    std::signal(SIGINT, signal_handler);
+    
+    while (g_running) {
+        poll_sockets();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    
+    // Cleanup
+    if (g_control_client != INVALID_SOCKET) closesocket(g_control_client);
+    if (g_data_client != INVALID_SOCKET) closesocket(g_data_client);
+    closesocket(g_control_listen);
+    closesocket(g_data_listen);
+    
+#ifdef _WIN32
+    WSACleanup();
+#endif
+    
+    std::cout << "\nShutdown complete." << std::endl;
+    return 0;
+}
