@@ -2,6 +2,8 @@ name: Build and Release
 
 on:
   push:
+    branches:
+      - master
     tags:
       - 'v*'
   release:
@@ -32,15 +34,24 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $baseVersion = "${{ github.ref_name }}"
+          # Base version - use tag if available, otherwise use hardcoded base
+          $baseVersion = "v1.0.1"
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $baseVersion = "${{ github.ref_name }}"
+          }
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $baseVersion = "${{ github.event.inputs.version }}"
           }
+          if ("${{ github.event_name }}" -eq "release") {
+            $baseVersion = "${{ github.event.release.tag_name }}"
+          }
+          
           $buildNum = "${{ github.run_number }}"
           $commitShort = "${{ github.sha }}".Substring(0, 7)
           $fullVersion = "$baseVersion-build.$buildNum-$commitShort"
           $fileVersion = "$baseVersion-build$buildNum-$commitShort"
           
+          Write-Host "Base Version: $baseVersion"
           Write-Host "Full Version: $fullVersion"
           
           echo "base=$baseVersion" >> $env:GITHUB_OUTPUT
@@ -124,7 +135,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: "Paul Brain Modem Core ${{ steps.version.outputs.full }}"
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.version.outputs.full }}
           body: |
             ## Paul Brain Modem Core - MIL-STD-188-110A Modem Server
             
