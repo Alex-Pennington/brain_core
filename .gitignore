@@ -1,0 +1,20 @@
+# Build artifacts
+*.exe
+*.o
+*.obj
+build/
+build_err.txt
+
+# PCM output files
+tx_pcm_out/*.pcm
+
+# IDE files
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
