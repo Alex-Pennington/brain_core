@@ -1,0 +1,161 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MinGW
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: x64
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $CXX = "g++"
+          $CXXFLAGS = "-std=c++17 -O2 -I. -Im188110a -D_USE_MATH_DEFINES -DWIN32"
+          $LDFLAGS = "-lws2_32 -static -static-libgcc -static-libstdc++"
+          $SOURCES = @(
+            "src/main.cpp",
+            "m188110a/de110a.cpp",
+            "m188110a/eq110a.cpp", 
+            "m188110a/g110a.cpp",
+            "m188110a/in110a.cpp",
+            "m188110a/ptx110a.cpp",
+            "m188110a/rxm110a.cpp",
+            "m188110a/t110a.cpp",
+            "m188110a/txm110a.cpp",
+            "m188110a/v110a.cpp"
+          )
+          $cmd = "$CXX $CXXFLAGS -o brain_modem_server.exe $($SOURCES -join ' ') $LDFLAGS"
+          Write-Host "Compiling: $cmd"
+          Invoke-Expression $cmd
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Write-Host "Build successful!"
+          Get-Item brain_modem_server.exe | Select-Object Name, Length
+
+      - name: Create release package
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ github.event.inputs.version }}"
+          }
+          
+          # Create release directory
+          New-Item -ItemType Directory -Path "release" -Force | Out-Null
+          New-Item -ItemType Directory -Path "release/tx_pcm_out" -Force | Out-Null
+          
+          # Copy executable
+          Copy-Item "brain_modem_server.exe" "release/"
+          
+          # Create README
+          @"
+          # Paul Brain Modem Core - Headless TCP Server
+          Version: $version
+
+          ## Quick Start
+
+          1. Run: brain_modem_server.exe
+          2. Connect to:
+             - Control port: localhost:3999
+             - Data port: localhost:3998
+
+          ## Commands
+
+          | Command | Description |
+          |---------|-------------|
+          | CMD:DATA RATE:600S | Set mode (75S/L, 150S/L, 300S/L, 600S/L, 1200S/L, 2400S/L, 4800S) |
+          | CMD:SENDBUFFER | Transmit buffered data |
+          | CMD:RXAUDIOINJECT:path.pcm | Inject PCM file for RX decode |
+          | CMD:QUERY:STATUS | Get current status |
+
+          ## Data Flow
+
+          ### Transmit (TX)
+          1. Connect to data port 3998
+          2. Send binary data
+          3. Send CMD:SENDBUFFER on control port
+          4. PCM file generated in tx_pcm_out/
+
+          ### Receive (RX)
+          1. Send CMD:RXAUDIOINJECT:filepath.pcm on control port
+          2. Decoded data appears on data port 3998
+
+          ## PCM Format
+          - Sample rate: 9600 Hz
+          - Format: 16-bit signed, little-endian, mono
+
+          ## Requirements
+          - Windows 10 or later
+          - No additional DLLs required
+
+          ## Verification
+          This release is signed with GitHub Artifact Attestation.
+          Verify with: gh attestation verify brain_modem_server.exe --owner Alex-Pennington
+          "@ | Out-File -FilePath "release/README.md" -Encoding UTF8
+          
+          # Create ZIP
+          $zipName = "brain_modem_server_$version.zip"
+          Compress-Archive -Path "release/*" -DestinationPath $zipName -CompressionLevel Optimal
+          Write-Host "Created: $zipName"
+          
+          # Also keep standalone exe for attestation
+          Copy-Item "brain_modem_server.exe" "brain_modem_server_$version.exe"
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            brain_modem_server_*.zip
+            brain_modem_server_*.exe
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Paul Brain Modem Core ${{ github.ref_name }}"
+          body: |
+            ## Paul Brain Modem Core - MIL-STD-188-110A Modem Server
+            
+            ### Changes
+            - Headless TCP server for automated testing
+            - Control port: 3999, Data port: 3998
+            - Supports all 13 MIL-STD-188-110A modes
+            
+            ### Verification
+            This release includes GitHub artifact attestation. Verify the build provenance:
+            ```bash
+            gh attestation verify brain_modem_server_${{ github.ref_name }}.exe --owner Alex-Pennington
+            ```
+            
+            ### Quick Start
+            1. Download and extract the ZIP
+            2. Run `brain_modem_server.exe`
+            3. Connect via TCP to ports 3998 (data) and 3999 (control)
+          files: |
+            brain_modem_server_*.zip
+            brain_modem_server_*.exe
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
