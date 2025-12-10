@@ -111,8 +111,9 @@ jobs:
           Verify with: gh attestation verify brain_modem_server.exe --owner Alex-Pennington
           "@ | Out-File -FilePath "release/README.md" -Encoding UTF8
           
-          # Create ZIP
+          # Create ZIP (remove if exists)
           $zipName = "brain_modem_server_$version.zip"
+          if (Test-Path $zipName) { Remove-Item $zipName -Force }
           Compress-Archive -Path "release/*" -DestinationPath $zipName -CompressionLevel Optimal
           Write-Host "Created: $zipName"
           
