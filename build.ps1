@@ -9,7 +9,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 
 $CXX = "g++"
 $CXXFLAGS = "-std=c++17 -O2 -I. -Im188110a -D_USE_MATH_DEFINES -DWIN32"
-$LDFLAGS = "-lws2_32 -static"
+$LDFLAGS = "-lws2_32 -static -static-libgcc -static-libstdc++"
 
 $Sources = @(
     "src/main.cpp",
