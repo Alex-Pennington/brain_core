@@ -5,6 +5,9 @@
 build/
 build_err.txt
 
+# Generated version header
+src/version.h
+
 # PCM output files
 tx_pcm_out/*.pcm
 

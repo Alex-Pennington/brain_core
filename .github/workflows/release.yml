@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g., v1.0.0)'
+        description: 'Base version (e.g., v1.0.1)'
         required: true
-        default: 'v1.0.0'
+        default: 'v1.0.1'
 
 permissions:
   contents: write
@@ -23,6 +23,42 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate version info
+        id: version
+        shell: pwsh
+        run: |
+          # Base version from tag or input
+          $baseVersion = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $baseVersion = "${{ github.event.inputs.version }}"
+          }
+          
+          # Get build number (GitHub run number)
+          $buildNum = "${{ github.run_number }}"
+          
+          # Get short commit SHA
+          $commitShort = "${{ github.sha }}".Substring(0, 7)
+          
+          # Full version string: v1.0.1-build.5-abc1234
+          $fullVersion = "$baseVersion-build.$buildNum-$commitShort"
+          
+          # For filenames (no dots in build part)
+          $fileVersion = "$baseVersion-build$buildNum-$commitShort"
+          
+          Write-Host "Base Version: $baseVersion"
+          Write-Host "Build Number: $buildNum"
+          Write-Host "Commit: $commitShort"
+          Write-Host "Full Version: $fullVersion"
+          Write-Host "File Version: $fileVersion"
+          
+          echo "base=$baseVersion" >> $env:GITHUB_OUTPUT
+          echo "build=$buildNum" >> $env:GITHUB_OUTPUT
+          echo "commit=$commitShort" >> $env:GITHUB_OUTPUT
+          echo "full=$fullVersion" >> $env:GITHUB_OUTPUT
+          echo "file=$fileVersion" >> $env:GITHUB_OUTPUT
 
       - name: Setup MinGW
         uses: msys2/setup-msys2@v2
@@ -33,8 +69,11 @@ jobs:
 
       - name: Build
         shell: msys2 {0}
+        env:
+          VERSION_STRING: ${{ steps.version.outputs.full }}
         run: |
           g++ -std=c++17 -O2 -I. -Im188110a -D_USE_MATH_DEFINES -DWIN32 \
+            -DVERSION_STRING="\"${VERSION_STRING}\"" \
             -o brain_modem_server.exe \
             src/main.cpp \
             m188110a/de110a.cpp \
@@ -52,12 +91,13 @@ jobs:
 
       - name: Create release package
         shell: pwsh
+        env:
+          VERSION_FULL: ${{ steps.version.outputs.full }}
+          VERSION_FILE: ${{ steps.version.outputs.file }}
+          VERSION_BASE: ${{ steps.version.outputs.base }}
+          BUILD_NUM: ${{ steps.version.outputs.build }}
+          COMMIT_SHORT: ${{ steps.version.outputs.commit }}
         run: |
-          $version = "${{ github.ref_name }}"
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $version = "${{ github.event.inputs.version }}"
-          }
-          
           # Create release directory
           New-Item -ItemType Directory -Path "release" -Force | Out-Null
           New-Item -ItemType Directory -Path "release/tx_pcm_out" -Force | Out-Null
@@ -67,58 +107,63 @@ jobs:
           
           # Create README
           @"
-          # Paul Brain Modem Core - Headless TCP Server
-          Version: $version
+# Paul Brain Modem Core - Headless TCP Server
+Version: $env:VERSION_FULL
+Build: $env:BUILD_NUM
+Commit: $env:COMMIT_SHORT
 
-          ## Quick Start
+## Quick Start
 
-          1. Run: brain_modem_server.exe
-          2. Connect to:
-             - Control port: localhost:3999
-             - Data port: localhost:3998
+1. Run: brain_modem_server.exe
+2. Connect to:
+   - Control port: localhost:3999
+   - Data port: localhost:3998
 
-          ## Commands
+## Commands
 
-          | Command | Description |
-          |---------|-------------|
-          | CMD:DATA RATE:600S | Set mode (75S/L, 150S/L, 300S/L, 600S/L, 1200S/L, 2400S/L, 4800S) |
-          | CMD:SENDBUFFER | Transmit buffered data |
-          | CMD:RXAUDIOINJECT:path.pcm | Inject PCM file for RX decode |
-          | CMD:QUERY:STATUS | Get current status |
+| Command | Description |
+|---------|-------------|
+| CMD:DATA RATE:600S | Set mode (75S/L, 150S/L, 300S/L, 600S/L, 1200S/L, 2400S/L, 4800S) |
+| CMD:SENDBUFFER | Transmit buffered data |
+| CMD:RXAUDIOINJECT:path.pcm | Inject PCM file for RX decode |
+| CMD:QUERY:STATUS | Get current status |
 
-          ## Data Flow
+## Data Flow
 
-          ### Transmit (TX)
-          1. Connect to data port 3998
-          2. Send binary data
-          3. Send CMD:SENDBUFFER on control port
-          4. PCM file generated in tx_pcm_out/
+### Transmit (TX)
+1. Connect to data port 3998
+2. Send binary data
+3. Send CMD:SENDBUFFER on control port
+4. PCM file generated in tx_pcm_out/
 
-          ### Receive (RX)
-          1. Send CMD:RXAUDIOINJECT:filepath.pcm on control port
-          2. Decoded data appears on data port 3998
+### Receive (RX)
+1. Send CMD:RXAUDIOINJECT:filepath.pcm on control port
+2. Decoded data appears on data port 3998
 
-          ## PCM Format
-          - Sample rate: 9600 Hz
-          - Format: 16-bit signed, little-endian, mono
+## PCM Format
+- Sample rate: 9600 Hz
+- Format: 16-bit signed, little-endian, mono
 
-          ## Requirements
-          - Windows 10 or later
-          - No additional DLLs required
+## Requirements
+- Windows 10 or later
+- No additional DLLs required
 
-          ## Verification
-          This release is signed with GitHub Artifact Attestation.
-          Verify with: gh attestation verify brain_modem_server.exe --owner Alex-Pennington
-          "@ | Out-File -FilePath "release/README.md" -Encoding UTF8
+## Verification
+This release is signed with GitHub Artifact Attestation.
+Verify with: gh attestation verify brain_modem_server.exe --owner Alex-Pennington
+"@ | Out-File -FilePath "release/README.md" -Encoding UTF8
           
           # Create ZIP (remove if exists)
-          $zipName = "brain_modem_server_$version.zip"
+          $zipName = "brain_modem_server_$env:VERSION_FILE.zip"
           if (Test-Path $zipName) { Remove-Item $zipName -Force }
           Compress-Archive -Path "release/*" -DestinationPath $zipName -CompressionLevel Optimal
           Write-Host "Created: $zipName"
           
           # Also keep standalone exe for attestation
-          Copy-Item "brain_modem_server.exe" "brain_modem_server_$version.exe"
+          Copy-Item "brain_modem_server.exe" "brain_modem_server_$env:VERSION_FILE.exe"
+          
+          # List artifacts
+          Get-ChildItem brain_modem_server_* | ForEach-Object { Write-Host $_.Name }
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v2
@@ -130,11 +175,16 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Paul Brain Modem Core ${{ github.ref_name }}"
+          name: "Paul Brain Modem Core ${{ steps.version.outputs.full }}"
+          tag_name: ${{ github.ref_name }}
           body: |
             ## Paul Brain Modem Core - MIL-STD-188-110A Modem Server
             
-            ### Changes
+            **Version:** `${{ steps.version.outputs.full }}`
+            **Build:** `${{ steps.version.outputs.build }}`
+            **Commit:** [`${{ steps.version.outputs.commit }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+            
+            ### Features
             - Headless TCP server for automated testing
             - Control port: 3999, Data port: 3998
             - Supports all 13 MIL-STD-188-110A modes
@@ -142,7 +192,7 @@ jobs:
             ### Verification
             This release includes GitHub artifact attestation. Verify the build provenance:
             ```bash
-            gh attestation verify brain_modem_server_${{ github.ref_name }}.exe --owner Alex-Pennington
+            gh attestation verify brain_modem_server_${{ steps.version.outputs.file }}.exe --owner Alex-Pennington
             ```
             
             ### Quick Start

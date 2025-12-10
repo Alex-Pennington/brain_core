@@ -7,6 +7,15 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Paul Brain Modem Core - Build" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 
+# Generate local version string with git info
+$commitShort = "unknown"
+try {
+    $commitShort = (git rev-parse --short HEAD 2>$null)
+    if (-not $commitShort) { $commitShort = "unknown" }
+} catch { }
+$localVersion = "v1.0.1-local-$commitShort"
+Write-Host "Version: $localVersion" -ForegroundColor Gray
+
 $CXX = "g++"
 $CXXFLAGS = "-std=c++17 -O2 -I. -Im188110a -D_USE_MATH_DEFINES -DWIN32"
 # Static link libgcc and libstdc++ - KERNEL32/WS2_32/UCRT are Windows system DLLs
@@ -31,6 +40,16 @@ $Output = "brain_modem_server.exe"
 if (-not (Test-Path "tx_pcm_out")) {
     New-Item -ItemType Directory -Path "tx_pcm_out" | Out-Null
 }
+
+# Generate version header
+$versionHeader = @"
+// Auto-generated version header
+#ifndef VERSION_H
+#define VERSION_H
+#define VERSION_STRING "$localVersion"
+#endif
+"@
+$versionHeader | Out-File -FilePath "src/version.h" -Encoding ASCII -NoNewline
 
 Write-Host "`nCompiling..." -ForegroundColor Yellow
 
