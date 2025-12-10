@@ -7,6 +7,9 @@ Usage: python3 generate_license.py [customer_id] [expiry_date]
 import sys
 import subprocess
 import datetime
+import tempfile
+import os
+import shutil
 
 def get_hardware_id():
     """Get hardware ID by compiling and running a small C++ program"""
@@ -37,15 +40,36 @@ int main() {
 }
 '''
     
-    # Write temp file
-    with open('/tmp/get_hwid.cpp', 'w') as f:
-        f.write(cpp_code)
+    # Check if g++ is available
+    if shutil.which('g++') is None:
+        print("ERROR: g++ compiler not found. Please install g++.")
+        sys.exit(1)
     
-    # Compile and run
-    subprocess.run(['g++', '-o', '/tmp/get_hwid', '/tmp/get_hwid.cpp'], check=True)
-    result = subprocess.run(['/tmp/get_hwid'], capture_output=True, text=True, check=True)
-    
-    return result.stdout.strip()
+    # Use temporary directory for cross-platform compatibility
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cpp_file = os.path.join(tmpdir, 'get_hwid.cpp')
+        exe_file = os.path.join(tmpdir, 'get_hwid')
+        
+        # Write temp file
+        with open(cpp_file, 'w') as f:
+            f.write(cpp_code)
+        
+        # Compile
+        try:
+            subprocess.run(['g++', '-o', exe_file, cpp_file], 
+                         check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            print(f"ERROR: Compilation failed: {e.stderr}")
+            sys.exit(1)
+        
+        # Run
+        try:
+            result = subprocess.run([exe_file], capture_output=True, text=True, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"ERROR: Execution failed: {e.stderr}")
+            sys.exit(1)
+        
+        return result.stdout.strip()
 
 def compute_checksum(data):
     """Compute license checksum matching the C++ implementation"""
