@@ -121,15 +121,12 @@ jobs:
           if (Test-Path $zipName) { Remove-Item $zipName -Force }
           Compress-Archive -Path "release/*" -DestinationPath $zipName -CompressionLevel Optimal
           Write-Host "Created: $zipName"
-          
-          Copy-Item "brain_modem_server.exe" "brain_modem_server_$env:VERSION_FILE.exe"
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
             brain_modem_server_*.zip
-            brain_modem_server_*.exe
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -150,11 +147,10 @@ jobs:
             
             ### Verification
             ```bash
-            gh attestation verify brain_modem_server_${{ steps.version.outputs.file }}.exe --owner Alex-Pennington
+            gh attestation verify brain_modem_server_${{ steps.version.outputs.file }}.zip --owner Alex-Pennington
             ```
           files: |
             brain_modem_server_*.zip
-            brain_modem_server_*.exe
           draft: false
           prerelease: false
         env:
