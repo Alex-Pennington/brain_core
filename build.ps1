@@ -55,7 +55,7 @@ Write-Host "Version: $localVersion" -ForegroundColor Gray
 $CXX = "g++"
 $CXXFLAGS = "-std=c++17 -O2 -I. -Iinclude -Iinclude/m188110a -D_USE_MATH_DEFINES -DWIN32"
 # Static link libgcc and libstdc++ - KERNEL32/WS2_32/UCRT are Windows system DLLs
-$LDFLAGS = "-Llib -lm188110a -lws2_32 -static -static-libgcc -static-libstdc++"
+$LDFLAGS = "-Llib/win64 -lm188110a -lws2_32 -static -static-libgcc -static-libstdc++"
 
 $Sources = @(
     "src/main.cpp"

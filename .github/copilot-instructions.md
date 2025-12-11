@@ -19,9 +19,10 @@ This is a **MIL-STD-188-110A modem implementation** wrapped as a headless TCP se
 │  - Socket handling, command parsing, PCM file I/O      │
 │  - Global modem instance: g_modem (Cm110s class)       │
 ├─────────────────────────────────────────────────────────┤
-│          lib/libm188110a.a (Static Library)             │
+│     lib/<platform>/libm188110a.a (Static Library)       │
 │  Pre-compiled Paul Brain modem core                     │
-│  Headers in include/m188110a/Cm110s.h                   │
+│  Headers in include/m188110a/                           │
+│  Platforms: win64, linux64, macos64                     │
 └─────────────────────────────────────────────────────────┘
 ```
 
