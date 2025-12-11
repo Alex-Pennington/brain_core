@@ -29,14 +29,16 @@ jobs:
             platform: win64
             artifact: brain_modem_server.exe
             shell: msys2 {0}
-          - os: ubuntu-latest
-            platform: linux64
-            artifact: brain_modem_server
-            shell: bash
-          - os: macos-latest
-            platform: macos64
-            artifact: brain_modem_server
-            shell: bash
+          # Uncomment when Linux library is added to lib/linux64/
+          # - os: ubuntu-latest
+          #   platform: linux64
+          #   artifact: brain_modem_server
+          #   shell: bash
+          # Uncomment when macOS library is added to lib/macos64/
+          # - os: macos-latest
+          #   platform: macos64
+          #   artifact: brain_modem_server
+          #   shell: bash
     
     runs-on: ${{ matrix.os }}
     
