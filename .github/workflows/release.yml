@@ -88,6 +88,14 @@ jobs:
           update: true
           install: mingw-w64-x86_64-gcc
 
+      - name: Extract source from history (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          # Extract source from git history (commit before source removal)
+          git checkout 83c9c57 -- m188110a/
+          ls -la m188110a/
+
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
         shell: msys2 {0}
@@ -99,9 +107,6 @@ jobs:
           echo "#define VERSION_H" >> src/version.h
           echo "#define VERSION_STRING \"${VERSION_STRING}\"" >> src/version.h
           echo "#endif" >> src/version.h
-          
-          # Extract source from git history (commit before source removal)
-          git checkout 83c9c57 -- m188110a/
           
           # Build static library from source
           echo "Building static library..."
