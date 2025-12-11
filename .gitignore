@@ -11,13 +11,6 @@ src/version.h
 # PCM output files
 tx_pcm_out/*.pcm
 
-# IDE files
-.vscode/
-*.swp
-*.swo
-*~
+# Proprietary modem core source (keep locally, don't push)
+m188110a/
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
