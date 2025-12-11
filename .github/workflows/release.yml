@@ -80,18 +80,10 @@ jobs:
           echo "#define VERSION_STRING \"${VERSION_STRING}\"" >> src/version.h
           echo "#endif" >> src/version.h
           
-          g++ -std=c++17 -O2 -I. -Im188110a -D_USE_MATH_DEFINES -DWIN32 \
+          g++ -std=c++17 -O2 -I. -Iinclude -Iinclude/m188110a -D_USE_MATH_DEFINES -DWIN32 \
             -o brain_modem_server.exe \
             src/main.cpp \
-            m188110a/de110a.cpp \
-            m188110a/eq110a.cpp \
-            m188110a/g110a.cpp \
-            m188110a/in110a.cpp \
-            m188110a/ptx110a.cpp \
-            m188110a/rxm110a.cpp \
-            m188110a/t110a.cpp \
-            m188110a/txm110a.cpp \
-            m188110a/v110a.cpp \
+            -Llib -lm188110a \
             -lws2_32 -static -static-libgcc -static-libstdc++
           echo "Build successful!"
           ls -la brain_modem_server.exe
