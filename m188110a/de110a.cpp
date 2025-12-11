@@ -849,7 +849,6 @@ void Cm110s::demodulate_reset( Mode mode )
 	output_bit_downcount         = M1_NORMAL_PATH_LENGTH-1;
 	output_bit_count             = 0;
     demod_state                  = DEMOD_IDLE_STATE; 
-	reset_rx_discard();  // Reset the startup byte discard counter 
 
 
 	static char ts[50];

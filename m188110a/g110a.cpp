@@ -73,34 +73,21 @@ int * Cm110s::get_bits_to_send( int length )
 	return bp;
 }
 
-// Static for bit carry between bytes - reset when needed
-static unsigned char g_rx_last_bit = 0;
-// Counter to discard first bytes (interleaver startup garbage)
-static int g_rx_discard_count = 0;
-// Number of bytes to discard at startup (one interleaver block for short interleave)
-#define RX_DISCARD_BYTES 26
-
-void Cm110s::reset_rx_discard()
-{
-	g_rx_discard_count = 0;
-	g_rx_last_bit = 0;
-}
-
 void Cm110s::output_rx_octet( unsigned char octet )
 {
-	// FIX: Compensate for 1-bit left shift in received data
-	// Data comes in shifted left by 1 bit, so we shift right and carry between bytes
-	unsigned char corrected = (octet >> 1) | (g_rx_last_bit << 7);
-	g_rx_last_bit = octet & 1;
+	// Reverse bit order (MIL-STD-188-110A LSB/MSB correction)
+	// The decoder outputs bits in reverse order from how they were encoded
+	unsigned char reversed = 0;
+	reversed |= ((octet >> 0) & 1) << 7;
+	reversed |= ((octet >> 1) & 1) << 6;
+	reversed |= ((octet >> 2) & 1) << 5;
+	reversed |= ((octet >> 3) & 1) << 4;
+	reversed |= ((octet >> 4) & 1) << 3;
+	reversed |= ((octet >> 5) & 1) << 2;
+	reversed |= ((octet >> 6) & 1) << 1;
+	reversed |= ((octet >> 7) & 1) << 0;
 	
-	// Discard first RX_DISCARD_BYTES due to interleaver/Viterbi startup garbage
-	if (g_rx_discard_count < RX_DISCARD_BYTES) {
-		g_rx_discard_count++;
-		printf("[RX] Discarding startup byte %d: 0x%02X\n", g_rx_discard_count, corrected);
-		return;
-	}
-	
-	rx_callbk( corrected );
+	rx_callbk( reversed );
 }
 //
 // Set the transmit mode from a string.
