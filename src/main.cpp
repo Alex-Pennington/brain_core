@@ -48,7 +48,7 @@
 #include <iomanip>
 #include <ctime>
 
-#include "m188110a/Cm110s.h"
+#include "Cm110s.h"
 
 // ============================================================
 // Configuration

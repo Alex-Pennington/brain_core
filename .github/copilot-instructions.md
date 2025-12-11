@@ -19,19 +19,13 @@ This is a **MIL-STD-188-110A modem implementation** wrapped as a headless TCP se
 │  - Socket handling, command parsing, PCM file I/O      │
 │  - Global modem instance: g_modem (Cm110s class)       │
 ├─────────────────────────────────────────────────────────┤
-│               m188110a/ (Paul Brain Core)               │
-│  Cm110s.h    - Main modem class, Mode enum, callbacks  │
-│  txm110a.cpp - TX modulation chain                     │
-│  rxm110a.cpp - RX demodulation, DCD, sync              │
-│  eq110a.cpp  - Adaptive equalizer (LMS)                │
-│  de110a.cpp  - Deinterleaver, Viterbi decoder          │
-│  in110a.cpp  - Interleaver                             │
-│  v110a.cpp   - Viterbi encoder/decoder                 │
-│  g110a.cpp   - Symbol generation tables                │
-│  ptx110a.cpp - Preamble generation                     │
-│  t110a.cpp   - TX filter, interpolation                │
+│          lib/libm188110a.a (Static Library)             │
+│  Pre-compiled Paul Brain modem core                     │
+│  Headers in include/m188110a/Cm110s.h                   │
 └─────────────────────────────────────────────────────────┘
 ```
+
+**Note**: The modem core source code is proprietary. Only the statically linked library and headers are included in this repository.
 
 ---
 

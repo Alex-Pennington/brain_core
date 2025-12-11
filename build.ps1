@@ -53,21 +53,12 @@ $localVersion = "v$baseVersion-local-$commitShort"
 Write-Host "Version: $localVersion" -ForegroundColor Gray
 
 $CXX = "g++"
-$CXXFLAGS = "-std=c++17 -O2 -I. -Im188110a -D_USE_MATH_DEFINES -DWIN32"
+$CXXFLAGS = "-std=c++17 -O2 -I. -Iinclude -Iinclude/m188110a -D_USE_MATH_DEFINES -DWIN32"
 # Static link libgcc and libstdc++ - KERNEL32/WS2_32/UCRT are Windows system DLLs
-$LDFLAGS = "-lws2_32 -static -static-libgcc -static-libstdc++"
+$LDFLAGS = "-Llib -lm188110a -lws2_32 -static -static-libgcc -static-libstdc++"
 
 $Sources = @(
-    "src/main.cpp",
-    "m188110a/de110a.cpp",
-    "m188110a/eq110a.cpp", 
-    "m188110a/g110a.cpp",
-    "m188110a/in110a.cpp",
-    "m188110a/ptx110a.cpp",
-    "m188110a/rxm110a.cpp",
-    "m188110a/t110a.cpp",
-    "m188110a/txm110a.cpp",
-    "m188110a/v110a.cpp"
+    "src/main.cpp"
 )
 
 $Output = "brain_modem_server.exe"
