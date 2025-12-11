@@ -1,0 +1,3 @@
+# Placeholder for macOS x64 static library
+# Build with: g++ -c -std=c++17 -O2 -I../include/m188110a -D_USE_MATH_DEFINES <source_files>
+#             ar rcs libm188110a.a *.o

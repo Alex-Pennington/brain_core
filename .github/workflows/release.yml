@@ -21,8 +21,24 @@ permissions:
   attestations: write
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win64
+            artifact: brain_modem_server.exe
+            shell: msys2 {0}
+          - os: ubuntu-latest
+            platform: linux64
+            artifact: brain_modem_server
+            shell: bash
+          - os: macos-latest
+            platform: macos64
+            artifact: brain_modem_server
+            shell: bash
+    
+    runs-on: ${{ matrix.os }}
     
     steps:
       - name: Checkout code
@@ -32,44 +48,46 @@ jobs:
 
       - name: Generate version info
         id: version
-        shell: pwsh
+        shell: bash
         run: |
           # Read base version from VERSION file
-          $baseVersion = "v" + (Get-Content "VERSION" -Raw).Trim()
+          BASE_VERSION="v$(cat VERSION | tr -d '[:space:]')"
           
           # Override with tag/release/dispatch if provided
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $baseVersion = "${{ github.ref_name }}"
-          }
-          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.event.inputs.version }}" -ne "") {
-            $baseVersion = "${{ github.event.inputs.version }}"
-          }
-          if ("${{ github.event_name }}" -eq "release") {
-            $baseVersion = "${{ github.event.release.tag_name }}"
-          }
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            BASE_VERSION="${{ github.ref_name }}"
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            BASE_VERSION="${{ github.event.inputs.version }}"
+          fi
+          if [ "${{ github.event_name }}" = "release" ]; then
+            BASE_VERSION="${{ github.event.release.tag_name }}"
+          fi
           
-          $buildNum = "${{ github.run_number }}"
-          $commitShort = "${{ github.sha }}".Substring(0, 7)
-          $fullVersion = "$baseVersion-build.$buildNum-$commitShort"
-          $fileVersion = "$baseVersion-build$buildNum-$commitShort"
+          BUILD_NUM="${{ github.run_number }}"
+          COMMIT_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          FULL_VERSION="$BASE_VERSION-build.$BUILD_NUM-$COMMIT_SHORT"
+          FILE_VERSION="$BASE_VERSION-build$BUILD_NUM-$COMMIT_SHORT"
           
-          Write-Host "Base Version: $baseVersion"
-          Write-Host "Full Version: $fullVersion"
+          echo "Base Version: $BASE_VERSION"
+          echo "Full Version: $FULL_VERSION"
           
-          echo "base=$baseVersion" >> $env:GITHUB_OUTPUT
-          echo "build=$buildNum" >> $env:GITHUB_OUTPUT
-          echo "commit=$commitShort" >> $env:GITHUB_OUTPUT
-          echo "full=$fullVersion" >> $env:GITHUB_OUTPUT
-          echo "file=$fileVersion" >> $env:GITHUB_OUTPUT
+          echo "base=$BASE_VERSION" >> $GITHUB_OUTPUT
+          echo "build=$BUILD_NUM" >> $GITHUB_OUTPUT
+          echo "commit=$COMMIT_SHORT" >> $GITHUB_OUTPUT
+          echo "full=$FULL_VERSION" >> $GITHUB_OUTPUT
+          echo "file=$FILE_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Setup MinGW
+      - name: Setup MinGW (Windows)
+        if: matrix.os == 'windows-latest'
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
           install: mingw-w64-x86_64-gcc
 
-      - name: Build
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
         shell: msys2 {0}
         env:
           VERSION_STRING: ${{ steps.version.outputs.full }}
@@ -83,44 +101,143 @@ jobs:
           g++ -std=c++17 -O2 -I. -Iinclude -Iinclude/m188110a -D_USE_MATH_DEFINES -DWIN32 \
             -o brain_modem_server.exe \
             src/main.cpp \
-            -Llib -lm188110a \
+            -Llib/win64 -lm188110a \
             -lws2_32 -static -static-libgcc -static-libstdc++
           echo "Build successful!"
           ls -la brain_modem_server.exe
 
+      - name: Build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          VERSION_STRING: ${{ steps.version.outputs.full }}
+        run: |
+          # Create version header
+          cat > src/version.h << EOF
+          #ifndef VERSION_H
+          #define VERSION_H
+          #define VERSION_STRING "${VERSION_STRING}"
+          #endif
+          EOF
+          
+          g++ -std=c++17 -O2 -I. -Iinclude -Iinclude/m188110a -D_USE_MATH_DEFINES \
+            -o brain_modem_server \
+            src/main.cpp \
+            -Llib/linux64 -lm188110a \
+            -lpthread -static-libgcc -static-libstdc++
+          echo "Build successful!"
+          ls -la brain_modem_server
+
+      - name: Build (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        env:
+          VERSION_STRING: ${{ steps.version.outputs.full }}
+        run: |
+          # Create version header
+          cat > src/version.h << EOF
+          #ifndef VERSION_H
+          #define VERSION_H
+          #define VERSION_STRING "${VERSION_STRING}"
+          #endif
+          EOF
+          
+          g++ -std=c++17 -O2 -I. -Iinclude -Iinclude/m188110a -D_USE_MATH_DEFINES \
+            -o brain_modem_server \
+            src/main.cpp \
+            -Llib/macos64 -lm188110a \
+            -lpthread
+          echo "Build successful!"
+          ls -la brain_modem_server
+
       - name: Create release package
-        shell: pwsh
+        shell: bash
         env:
           VERSION_FULL: ${{ steps.version.outputs.full }}
           VERSION_FILE: ${{ steps.version.outputs.file }}
           BUILD_NUM: ${{ steps.version.outputs.build }}
           COMMIT_SHORT: ${{ steps.version.outputs.commit }}
+          PLATFORM: ${{ matrix.platform }}
+          ARTIFACT: ${{ matrix.artifact }}
         run: |
-          New-Item -ItemType Directory -Path "release" -Force | Out-Null
-          New-Item -ItemType Directory -Path "release/tx_pcm_out" -Force | Out-Null
-          Copy-Item "brain_modem_server.exe" "release/"
+          mkdir -p release/tx_pcm_out
+          cp $ARTIFACT release/
           
-          # Create simple README
-          $readme = "# Paul Brain Modem Core - Headless TCP Server`n"
-          $readme += "Version: $env:VERSION_FULL`n"
-          $readme += "Build: $env:BUILD_NUM`n"
-          $readme += "Commit: $env:COMMIT_SHORT`n`n"
-          $readme += "## Quick Start`n"
-          $readme += "1. Run: brain_modem_server.exe`n"
-          $readme += "2. Control port: localhost:3999`n"
-          $readme += "3. Data port: localhost:3998`n"
-          $readme | Out-File -FilePath "release/README.md" -Encoding UTF8
+          # Create README
+          cat > release/README.md << EOF
+          # Paul Brain Modem Core - Headless TCP Server
+          Version: $VERSION_FULL
+          Platform: $PLATFORM
+          Build: $BUILD_NUM
+          Commit: $COMMIT_SHORT
+
+          ## Quick Start
+          1. Run: ./$ARTIFACT
+          2. Control port: localhost:3999
+          3. Data port: localhost:3998
+          EOF
           
-          $zipName = "brain_modem_server_$env:VERSION_FILE.zip"
-          if (Test-Path $zipName) { Remove-Item $zipName -Force }
-          Compress-Archive -Path "release/*" -DestinationPath $zipName -CompressionLevel Optimal
-          Write-Host "Created: $zipName"
+          ZIP_NAME="brain_modem_server_${VERSION_FILE}_${PLATFORM}.zip"
+          cd release && zip -r "../$ZIP_NAME" . && cd ..
+          echo "Created: $ZIP_NAME"
+          
+          # Store zip name for later steps
+          echo "$ZIP_NAME" > zip_name.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: brain_modem_server-${{ matrix.platform }}
+          path: brain_modem_server_*.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate version info
+        id: version
+        shell: bash
+        run: |
+          BASE_VERSION="v$(cat VERSION | tr -d '[:space:]')"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            BASE_VERSION="${{ github.ref_name }}"
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            BASE_VERSION="${{ github.event.inputs.version }}"
+          fi
+          if [ "${{ github.event_name }}" = "release" ]; then
+            BASE_VERSION="${{ github.event.release.tag_name }}"
+          fi
+          
+          BUILD_NUM="${{ github.run_number }}"
+          COMMIT_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          FULL_VERSION="$BASE_VERSION-build.$BUILD_NUM-$COMMIT_SHORT"
+          FILE_VERSION="$BASE_VERSION-build$BUILD_NUM-$COMMIT_SHORT"
+          
+          echo "full=$FULL_VERSION" >> $GITHUB_OUTPUT
+          echo "file=$FILE_VERSION" >> $GITHUB_OUTPUT
+          echo "build=$BUILD_NUM" >> $GITHUB_OUTPUT
+          echo "commit=$COMMIT_SHORT" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release files
+        run: |
+          mkdir -p release_files
+          find artifacts -name "*.zip" -exec cp {} release_files/ \;
+          ls -la release_files/
 
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: |
-            brain_modem_server_*.zip
+          subject-path: release_files/*.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -134,6 +251,13 @@ jobs:
             **Build:** `${{ steps.version.outputs.build }}`
             **Commit:** `${{ steps.version.outputs.commit }}`
             
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows x64 | `brain_modem_server_${{ steps.version.outputs.file }}_win64.zip` |
+            | Linux x64 | `brain_modem_server_${{ steps.version.outputs.file }}_linux64.zip` |
+            | macOS x64 | `brain_modem_server_${{ steps.version.outputs.file }}_macos64.zip` |
+            
             ### Features
             - Headless TCP server for automated testing
             - Control port: 3999, Data port: 3998
@@ -141,11 +265,11 @@ jobs:
             
             ### Verification
             ```bash
-            gh attestation verify brain_modem_server_${{ steps.version.outputs.file }}.zip --owner Alex-Pennington
+            gh attestation verify <filename>.zip --owner Alex-Pennington
             ```
-          files: |
-            brain_modem_server_*.zip
+          files: release_files/*.zip
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
