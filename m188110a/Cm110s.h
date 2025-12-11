@@ -513,7 +513,6 @@ private:
 	void         demodulate_block( FComplex *in );
 	void         demodulate_reset( Mode mode );
 	void         output_rx_octet( U8 octet );
-	void         reset_rx_discard();
 	void         update_mse_average( FComplex error );
 	void         update_mse_average_ber(FComplex error);
 	const char  *display_mode_string( Mode mode );
