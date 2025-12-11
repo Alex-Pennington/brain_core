@@ -101,7 +101,12 @@ jobs:
         shell: msys2 {0}
         env:
           VERSION_STRING: ${{ steps.version.outputs.full }}
+          VERSION_FILE: ${{ steps.version.outputs.file }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
+          # Install zip utility
+          pacman -S --noconfirm zip
+          
           # Create version header
           echo "#ifndef VERSION_H" > src/version.h
           echo "#define VERSION_H" >> src/version.h
@@ -128,12 +133,28 @@ jobs:
             -lws2_32 -static -static-libgcc -static-libstdc++
           echo "Build successful!"
           ls -la brain_modem_server.exe
+          
+          # Create release package (do it here where zip is available)
+          mkdir -p release/tx_pcm_out
+          cp brain_modem_server.exe release/
+          cat > release/README.md << EOF
+          # Paul Brain Modem Core - Headless TCP Server
+          Version: ${VERSION_STRING}
+          Platform: ${PLATFORM}
+          EOF
+          
+          ZIP_NAME="brain_modem_server_${VERSION_FILE}_${PLATFORM}.zip"
+          cd release && zip -r "../$ZIP_NAME" . && cd ..
+          echo "Created: $ZIP_NAME"
+          ls -la $ZIP_NAME
 
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         env:
           VERSION_STRING: ${{ steps.version.outputs.full }}
+          VERSION_FILE: ${{ steps.version.outputs.file }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           # Create version header
           cat > src/version.h << EOF
@@ -150,12 +171,28 @@ jobs:
             -lpthread -static-libgcc -static-libstdc++
           echo "Build successful!"
           ls -la brain_modem_server
+          
+          # Create release package
+          mkdir -p release/tx_pcm_out
+          cp brain_modem_server release/
+          cat > release/README.md << EOF
+          # Paul Brain Modem Core - Headless TCP Server
+          Version: ${VERSION_STRING}
+          Platform: ${PLATFORM}
+          EOF
+          
+          ZIP_NAME="brain_modem_server_${VERSION_FILE}_${PLATFORM}.zip"
+          cd release && zip -r "../$ZIP_NAME" . && cd ..
+          echo "Created: $ZIP_NAME"
+          ls -la $ZIP_NAME
 
       - name: Build (macOS)
         if: matrix.os == 'macos-latest'
         shell: bash
         env:
           VERSION_STRING: ${{ steps.version.outputs.full }}
+          VERSION_FILE: ${{ steps.version.outputs.file }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           # Create version header
           cat > src/version.h << EOF
@@ -172,40 +209,20 @@ jobs:
             -lpthread
           echo "Build successful!"
           ls -la brain_modem_server
-
-      - name: Create release package
-        shell: bash
-        env:
-          VERSION_FULL: ${{ steps.version.outputs.full }}
-          VERSION_FILE: ${{ steps.version.outputs.file }}
-          BUILD_NUM: ${{ steps.version.outputs.build }}
-          COMMIT_SHORT: ${{ steps.version.outputs.commit }}
-          PLATFORM: ${{ matrix.platform }}
-          ARTIFACT: ${{ matrix.artifact }}
-        run: |
-          mkdir -p release/tx_pcm_out
-          cp $ARTIFACT release/
           
-          # Create README
+          # Create release package
+          mkdir -p release/tx_pcm_out
+          cp brain_modem_server release/
           cat > release/README.md << EOF
           # Paul Brain Modem Core - Headless TCP Server
-          Version: $VERSION_FULL
-          Platform: $PLATFORM
-          Build: $BUILD_NUM
-          Commit: $COMMIT_SHORT
-
-          ## Quick Start
-          1. Run: ./$ARTIFACT
-          2. Control port: localhost:3999
-          3. Data port: localhost:3998
+          Version: ${VERSION_STRING}
+          Platform: ${PLATFORM}
           EOF
           
           ZIP_NAME="brain_modem_server_${VERSION_FILE}_${PLATFORM}.zip"
           cd release && zip -r "../$ZIP_NAME" . && cd ..
           echo "Created: $ZIP_NAME"
-          
-          # Store zip name for later steps
-          echo "$ZIP_NAME" > zip_name.txt
+          ls -la $ZIP_NAME
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
