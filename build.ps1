@@ -1,7 +1,43 @@
 # build.ps1 - Paul Brain Modem Core Build Script
-# Usage: .\build.ps1
+# Usage: .\build.ps1 [-Increment patch|minor|major]
+
+param(
+    [ValidateSet("patch", "minor", "major")]
+    [string]$Increment
+)
 
 $ErrorActionPreference = "Stop"
+
+# Read current version from VERSION file
+$versionFile = Join-Path $PSScriptRoot "VERSION"
+if (Test-Path $versionFile) {
+    $baseVersion = (Get-Content $versionFile -Raw).Trim()
+} else {
+    $baseVersion = "1.0.0"
+    $baseVersion | Out-File -FilePath $versionFile -Encoding ASCII -NoNewline
+}
+
+# Parse version components
+if ($baseVersion -match '^(\d+)\.(\d+)\.(\d+)$') {
+    $major = [int]$Matches[1]
+    $minor = [int]$Matches[2]
+    $patch = [int]$Matches[3]
+} else {
+    Write-Host "Invalid version format in VERSION file: $baseVersion" -ForegroundColor Red
+    exit 1
+}
+
+# Increment version if requested
+if ($Increment) {
+    switch ($Increment) {
+        "major" { $major++; $minor = 0; $patch = 0 }
+        "minor" { $minor++; $patch = 0 }
+        "patch" { $patch++ }
+    }
+    $baseVersion = "$major.$minor.$patch"
+    $baseVersion | Out-File -FilePath $versionFile -Encoding ASCII -NoNewline
+    Write-Host "Version incremented to: $baseVersion" -ForegroundColor Yellow
+}
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Paul Brain Modem Core - Build" -ForegroundColor Cyan
@@ -13,7 +49,7 @@ try {
     $commitShort = (git rev-parse --short HEAD 2>$null)
     if (-not $commitShort) { $commitShort = "unknown" }
 } catch { }
-$localVersion = "v1.0.1-local-$commitShort"
+$localVersion = "v$baseVersion-local-$commitShort"
 Write-Host "Version: $localVersion" -ForegroundColor Gray
 
 $CXX = "g++"

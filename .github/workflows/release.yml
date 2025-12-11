@@ -34,12 +34,14 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          # Base version - use tag if available, otherwise use hardcoded base
-          $baseVersion = "v1.0.1"
+          # Read base version from VERSION file
+          $baseVersion = "v" + (Get-Content "VERSION" -Raw).Trim()
+          
+          # Override with tag/release/dispatch if provided
           if ("${{ github.ref_type }}" -eq "tag") {
             $baseVersion = "${{ github.ref_name }}"
           }
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.event.inputs.version }}" -ne "") {
             $baseVersion = "${{ github.event.inputs.version }}"
           }
           if ("${{ github.event_name }}" -eq "release") {
