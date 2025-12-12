@@ -1,5 +1,4 @@
-# Build artifacts
-*.exe
+# Build artifacts (keep exe for distribution)
 *.o
 *.obj
 build/
