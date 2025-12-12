@@ -4,23 +4,9 @@ Wrapper for the original m188110a MIL-STD-188-110A modem core by Paul Brain.
 
 Stripped of Qt/GUI dependencies for headless testing via TCP/IP and PCM files.
 
-## Features
+## Quick Start
 
-- **TCP Control Port (3999)**: ASCII commands for modem control
-- **TCP Data Port (3998)**: Binary data TX/RX
-- **PCM File Output**: TX audio saved to files for analysis
-- **PCM File Inject**: Feed RX audio from files for testing
-- **No Audio Devices**: Pure file-based operation for automated testing
-
-## Building (Windows)
-
-```powershell
-.\build.ps1
-```
-
-Requires: MinGW g++ with C++17 support
-
-## Usage
+A pre-built Windows executable is included in the repository:
 
 ```powershell
 .\brain_modem_server.exe
@@ -29,6 +15,14 @@ Requires: MinGW g++ with C++17 support
 Server listens on:
 - Control: `localhost:3999`
 - Data: `localhost:3998`
+
+## Features
+
+- **TCP Control Port (3999)**: ASCII commands for modem control
+- **TCP Data Port (3998)**: Binary data TX/RX
+- **PCM File Output**: TX audio saved to files for analysis
+- **PCM File Inject**: Feed RX audio from files for testing
+- **No Audio Devices**: Pure file-based operation for automated testing
 
 ## Commands (via Control Port)
 
@@ -86,5 +80,5 @@ Both use identical:
 
 ## License
 
-Original modem core license applies to m188110a/*.
-Wrapper code (src/*) is GPL-3.0-or-later, Copyright (C) 2025 Phoenix Nest LLC.
+The modem core is distributed as a pre-compiled static library. Source code is not included.
+Wrapper code (src/*) is proprietary, Copyright (C) 2025 Phoenix Nest LLC.
