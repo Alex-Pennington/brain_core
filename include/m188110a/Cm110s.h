@@ -6,10 +6,13 @@
 #ifndef CM110S_H
 #define CM110S_H
 
+
+
+
 #include "platform_compat.h"
 #include <queue>
 
-//using namespace std;
+using namespace std;
 
 typedef struct{
     float re;
@@ -285,7 +288,6 @@ class Cm110s
     const char*  rx_get_mode_string( void );
     const char*  tx_get_mode_string( void );
     Mode         tx_get_mode( void );
-    Mode         rx_get_mode( void );
     Mode         tx_get_decremented_bitrate( void );
     Mode         tx_get_incremented_bitrate( void );
     Mode         tx_get_toggled_interleave( void );
@@ -305,7 +307,7 @@ class Cm110s
     //
     // Soundcard Interface routines.
     //
-    void         rx_process_block( signed short *in, int length );
+    void         rx_process_block( unsigned short *in, int length );
     float        *tx_get_soundblock( void );
     void         tx_release_soundblock( float *block );
     void         set_psk_carrier( long carrier );
@@ -404,8 +406,7 @@ private:
 	FComplex     b2[M1_RX_BLOCK_LENGTH+(M1_RX_BLOCK_LENGTH/2)];
 	int          frame_start_position;
 	// Mags of last frame and current preamble
-	// Note: array sized to account for index offset of M1_FF_EQ_LENGTH/2 in rxm110a.cpp
-	float        m_p_mag[3][2][M1_RX_BLOCK_LENGTH/2 + M1_FF_EQ_LENGTH/2];
+	float        m_p_mag[3][2][M1_RX_BLOCK_LENGTH/2];
 	int          max_p_channel;
 //
 	FComplex     tx_preamble[11520];
@@ -451,7 +452,7 @@ private:
 //
 //  Transmit soundblock queue.
 //
-    std::queue<float*>tx_sb_q;
+	queue<float*>tx_sb_q;
 	float       *current_tx_soundblock;
 	int          current_sound_block_pointer;
 	int          tx_soundblock_size;
@@ -467,8 +468,8 @@ private:
 // Constellation routines
 // Contellation queue
 
-    std::queue<FComplex>m_c_q;
-    std::queue<FComplex>m_c_q_peq;  // Post Equalizer
+	queue<FComplex>m_c_q;
+	queue<FComplex>m_c_q_peq;  // Post Equalizer
 
 // PMAG Squelch factor
 
@@ -655,3 +656,4 @@ private:
 };
 
 #endif
+
