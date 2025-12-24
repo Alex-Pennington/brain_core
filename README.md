@@ -1,6 +1,6 @@
-# Paul Brain Modem Core - Headless TCP Server
+# Charles Brain Modem Core - Headless TCP Server
 
-Wrapper for the original m188110a MIL-STD-188-110A modem core by Paul Brain.
+Wrapper for the original m188110a MIL-STD-188-110A modem core by Charles Brain (G4GUO).
 
 Stripped of Qt/GUI dependencies for headless testing via TCP/IP and PCM files.
 
@@ -64,7 +64,7 @@ Server listens on:
 ## Comparison Testing
 
 This wrapper enables fair comparison between:
-- Paul Brain modem core (this project)
+- Charles Brain modem core (this project)
 - Phoenix Nest modem core
 
 Both use identical:
@@ -74,7 +74,7 @@ Both use identical:
 
 ## Credits
 
-- Original modem core: Paul Brain (m188110a)
+- Original modem core: Charles Brain (G4GUO) (m188110a)
 - TCP wrapper: Phoenix Nest LLC
 - MIL-STD-188-110A specification: U.S. Department of Defense
 

@@ -300,6 +300,22 @@ static void do_transmit() {
     g_tx_buffer.clear();
 }
 
+// Decimate 48kHz samples to 9600 Hz (5:1 ratio) using simple averaging
+static std::vector<int16_t> decimate_samples(const std::vector<int16_t>& input) {
+    const int RATIO = 5;  // 48000 / 9600 = 5
+    std::vector<int16_t> output;
+    output.reserve(input.size() / RATIO);
+    
+    for (size_t i = 0; i + RATIO <= input.size(); i += RATIO) {
+        int32_t sum = 0;
+        for (int j = 0; j < RATIO; j++) {
+            sum += input[i + j];
+        }
+        output.push_back(static_cast<int16_t>(sum / RATIO));
+    }
+    return output;
+}
+
 // ============================================================
 // RX Processing (PCM File Inject)
 // ============================================================
@@ -312,24 +328,30 @@ static void do_rx_inject(const std::string& filename) {
     }
     
     send_response(g_control_client, "RX:INJECTING:" + filename);
+
+    // Decimate 48kHz input to 9600 Hz (5:1 ratio)
+    std::cout << "[RX] Input: " << samples.size() << " samples at 48kHz ("
+              << (samples.size() / 48000.0) << " seconds)" << std::endl;
     
+    std::vector<int16_t> decimated = decimate_samples(samples);
+    
+    std::cout << "[RX] Decimated to " << decimated.size() << " samples at 9600 Hz"
+              << std::endl;
+
     // Clear RX buffer
     {
         std::lock_guard<std::mutex> lock(g_rx_mutex);
         g_rx_buffer.clear();
     }
-    
+
     // Feed samples to modem in blocks
     std::lock_guard<std::mutex> lock(g_modem_mutex);
     g_modem.rx_reset();
-    
-    std::cout << "[RX] Processing " << samples.size() << " samples (" 
-              << (samples.size() / 9600.0) << " seconds at 9600 Hz)" << std::endl;
-    
+
     const int BLOCK_SIZE = 512;
-    for (size_t i = 0; i < samples.size(); i += BLOCK_SIZE) {
-        int len = std::min(BLOCK_SIZE, static_cast<int>(samples.size() - i));
-        g_modem.rx_process_block(&samples[i], len);
+    for (size_t i = 0; i < decimated.size(); i += BLOCK_SIZE) {
+        int len = std::min(BLOCK_SIZE, static_cast<int>(decimated.size() - i));
+        g_modem.rx_process_block(&decimated[i], len);
     }
     
     // Flush with silence to push last data through decoder pipeline
@@ -444,6 +466,14 @@ static void poll_sockets() {
         socklen_t len = sizeof(addr);
         SOCKET client = accept(g_control_listen, (sockaddr*)&addr, &len);
         if (client != INVALID_SOCKET) {
+            // Set client socket non-blocking
+#ifdef _WIN32
+            u_long mode = 1;
+            ioctlsocket(client, FIONBIO, &mode);
+#else
+            int flags = fcntl(client, F_GETFL, 0);
+            fcntl(client, F_SETFL, flags | O_NONBLOCK);
+#endif
             g_control_client = client;
             std::cout << "[CONTROL] Client connected" << std::endl;
             send_response(g_control_client, "READY:Paul Brain Core");
@@ -456,6 +486,14 @@ static void poll_sockets() {
         socklen_t len = sizeof(addr);
         SOCKET client = accept(g_data_listen, (sockaddr*)&addr, &len);
         if (client != INVALID_SOCKET) {
+            // Set client socket non-blocking
+#ifdef _WIN32
+            u_long mode = 1;
+            ioctlsocket(client, FIONBIO, &mode);
+#else
+            int flags = fcntl(client, F_GETFL, 0);
+            fcntl(client, F_SETFL, flags | O_NONBLOCK);
+#endif
             g_data_client = client;
             std::cout << "[DATA] Client connected" << std::endl;
         }
